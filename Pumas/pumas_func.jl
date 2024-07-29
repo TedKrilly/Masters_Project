@@ -33,7 +33,11 @@ edes_model = @emmodel begin
              1.15 * (5.0 / (31 * 8.0))]
         
         # Input parameters (these should be provided as covariates or in the event data)
-        input = [75000.0, weight, 0.0]  # meal size, body weight, meal start time
+        input = [
+            isnothing(meal_size) ? 75000.0 : meal_size,          # Default meal size: 75000 mg
+            isnothing(weight) ? 70.0 : weight,                   # Default weight: 70 kg
+            isnothing(meal_start_time) ? 0.0 : meal_start_time   # Default meal start time: 0 min
+        ]
 
         # Derived constants
         c11 = 0.043 * (p_fixed[11] + p_fixed[12]) / p_fixed[12]
