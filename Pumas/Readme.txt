@@ -9,7 +9,10 @@ Omitted Plotting functions and PLA as for the moment I am interested in producin
 Model can handle both OGTT and CGM data by adjusting the derived variables and error model based on 
 the data_type covariate
 
+Assumptions of the model:
 
+    The model assumes that the parameters, random effects, and input parameters are log-normally distributed.
+    The model assumes that the error in the glucose measurements is normally distributed when data_type is "CGM" and proportional to the glucose measurements when data_type is not "CGM".
 
 Pumas-Func-Logic
 
