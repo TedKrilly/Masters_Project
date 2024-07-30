@@ -1,1 +1,2 @@
-
+This EDES-Model variant was created to investigate what happens when you try to estimate k1,k5, and k6 when you have only CGM glucose (no insulin). 
+I would expect that we can't find unique solutions( this is something called non-identfiabiliy) 
