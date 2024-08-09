@@ -1,2 +1,4 @@
 This version of the EDES model is the so called Baseline Model, basically this uses either the CGM or OGTT model estimates as the calibrated parameters which can them be 
 compared against one another as the complex meal data is added to compare their fit etc.
+
+To have this model run and produce an output you need to provide the HFMM data, and either the CGM or OGTT estimates.
