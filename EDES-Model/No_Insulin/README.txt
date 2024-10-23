@@ -13,15 +13,51 @@ A high glucose peak could be due to rapid glucose appearance (high k1) or poor i
 A rapid decline in glucose could be due to high insulin sensitivity (high k5) or rapid insulin secretion (high k6).
 
 
-Expected outcomes:
+This is a modified version of the glucose-insulin model that focuses solely on glucose dynamics.
+The key modification is the removal of insulin fitting from the loss function, making the
+model more robust when insulin data is incomplete or unreliable.
+Key Modifications from Original Model:
 
-When running this modified version, we expect to see:
+Loss Function
 
-The optimization algorithm may struggle to converge on unique solutions.
-Parameter estimates may hit the bounds of their allowed ranges.
-Confidence intervals for parameter estimates may be very wide.
-Different initial guesses may lead to wildly different final estimates.
-The model may fit the glucose data reasonably well, but with unrealistic parameter values.
 
-These outcomes would demonstrate that the model parameters are not identifiable using CGM glucose data alone, highlighting the importance of including insulin measurements in the parameter estimation process.
-This analysis serves to illustrate the limitations of using glucose data alone and the value of including insulin measurements in model calibration for accurate estimation of insulin sensitivity and secretion parameters.
+Original weighted both glucose and insulin fits
+Modified to only consider glucose error: loss = 100*loss_g
+Still tracks insulin dynamics but doesn't fit to insulin data
+More stable optimization due to simpler objective function
+
+
+Data Requirements
+
+
+Primary input: glucose measurements
+Insulin measurements optional
+Works with both OGTT and CGM data
+Added robustness checks for data completeness
+
+
+Error Handling
+
+
+Checks for missing data before processing
+Verifies minimum data points for CGM analysis
+Gracefully skips problematic datasets
+Clear console messages for skipped analyses
+
+Input Data Format (test.csv):
+Required columns:
+
+ID: Subject identifier
+metab: Measurement type (gluc/ins)
+Condition: Test condition
+test: OGTT or CGM
+time: Measurement timestamps
+VAL: Measured values
+
+Output Files:
+
+OGTTestimates.csv: Parameter estimates for OGTT data
+OGTTsimulates.csv: Model simulations
+OGTTresiduals.csv: Fit residuals
+Plus CGM equivalents if CGM data present
+Individual plots for each subject/condition
