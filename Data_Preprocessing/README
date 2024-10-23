@@ -8,7 +8,7 @@ HFMM_meal_data_locator3: Processes raw CGM data with HFMM timing
 
 
 Excel Data Processors:
-OGTT&CGM_meal_locator: Processes OGTT glucose, insulin, and CGM data
+Combined_Data_Processor: Processes OGTT glucose, insulin, and CGM data
 HFMM_meal_processor: Processes HFMM plasma glucose and insulin data
 
 
