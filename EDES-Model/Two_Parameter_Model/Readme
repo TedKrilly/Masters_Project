@@ -1,1 +1,72 @@
 This folder contains the files for implementing the fixed k6 parameter variant of the EDES-model. 
+
+Generally: 
+
+k6HFMM Implementation Notes
+Overview:
+Implementation of glucose-insulin model with fixed k6 parameter (insulin secretion)
+k6 value fixed at 1.689878215 (population average)
+OGTT analysis only, CGM functionality removed
+Extended simulation timespan to 240 minutes
+Key Implementation Details:
+
+Parameter Estimation
+
+
+Reduced from 3 to 2 parameters
+Currently estimating:
+k1: glucose absorption rate
+k5: insulin sensitivity
+k6 moved to p_fixed array
+Parameter bounds adjusted accordingly
+Optimization problem modified for 2D parameter space
+
+
+Critical Changes in func.jl:
+
+
+edes_delayfix!: Using fixed k6 from p_fixed
+set_conditions():
+
+p_adj reduced to [k1, k5]
+bounds arrays adjusted to length 2
+k6 added to p_fixed array
+
+
+PLA(): Modified for 2-parameter system
+bands(): Adjusted for 2-parameter confidence intervals
+
+
+Data Processing:
+
+
+Input data filtered for OGTT only
+Timestamp handling extended to 240 minutes
+Results storage adjusted for 2 parameters
+CGM-related code sections removed
+
+
+Output Structure:
+Files prefixed with "HFMM_k6_"
+
+
+estimates.csv: Contains k1, k5 only
+simulates.csv: 240-minute trajectories
+residuals.csv: Error calculations
+
+
+Technical Specifications:
+
+
+Simulation timespan: 0 to 240 minutes
+k6 fixed value: 1.689878215
+Solver: RadauIIA5()
+Optimization: MultistartOptimization.TikTak(1000)
+Tolerance settings unchanged
+
+
+Dependencies:
+Standard package requirements maintained
+CGM-specific dependencies removed
+
+Note: Code assumes input data contains 'test' column for OGTT filtering
