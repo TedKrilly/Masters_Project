@@ -1,4 +1,40 @@
+Baseline Model - Quick Guide
 This version of the EDES model is the so called Baseline Model, basically this uses either the CGM or OGTT model estimates as the calibrated parameters which can them be 
-compared against one another as the complex meal data is added to compare their fit etc.
+compared against one another as the complex meal data is added to compare their fit etc.This is a stripped-down version of the original glucose-insulin model, mainly for
+validating OGTT fits against complex meal data.
 
-To have this model run and produce an output you need to provide the HFMM data, and either the CGM or OGTT estimates.
+Main Changes
+
+Filters matching IDs between OGTT & complex meal data
+Added specific complex meal validation
+New metrics for checking model performance
+Saves results in separate files for OGTT vs complex meals
+
+New Files
+baseline_fit_short2.jl  - Main script
+test_robustness2.jl    - Complex meal validation
+func_copy.jl           - Core model (modified from func.jl)
+
+Key Differences from Original
+
+Data handling:
+
+Uses HFMMdata_filtered.csv instead of real_data.csv
+Filters for matching IDs automatically
+Separate handling for OGTT vs complex meals
+
+
+Added metrics:
+
+Time in Range (TIR)
+Peak & time-to-peak
+AUC (Area Under Curve)
+R-squared for fits
+
+
+Output:
+
+ComplexMealSimulates_OGTT.csv
+ComplexMealResiduals_OGTT.csv
+ComplexMealMetrics.csv
+Individual plots with confidence bands
