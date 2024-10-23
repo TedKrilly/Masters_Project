@@ -1,0 +1,200 @@
+---
+title: "EDES-Model Comparison"
+author: "Paul O'Dwyer"
+date: "2024-08-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+1. So first I compared the values of k5 that were returned by from running the EDES model upon
+the OGTT, CGM and HFMM data, I want to compare them against one another and also the CLAMP. Correlation
+```{r}
+# Load required libraries
+library(tidyverse)
+library(corrplot)
+```
+
+```{r}
+# Read the data
+comp_clamp_data <- read.csv("C://Users//paulo//Desktop//Masters_Project//Data Processing//Real data//Erdos_data_with clamp.csv")
+comp_ogtt_data <- read.csv("C://Users//paulo//Desktop//Masters_Project//EDES-Model//Results//OGTTestimates.csv")
+comp_hfmm_data <- read.csv("C://Users//paulo//Desktop//Task_Split//HFMM//HFMMestimates.csv")
+comp_cgm_data <- read.csv("C://Users//paulo//Desktop//Masters_Project//EDES-Model//Results//CGMestimates.csv")
+hfmm_k6_fixed_data <- read.csv("C://Users//paulo//Desktop//Task_Split//HFMM_k6_fixed//HFMM_k6_estimates.csv")
+personalised_hfmm_k6_fixed_data <- read.csv("C://Users//paulo//Desktop//Task_Split//HFMM_k6_fixed//Personalisedk6_HFMM// HFMM_personalised_k6_estimates.csv")
+```
+
+```{r}
+# Filter k5 values for the new datasets
+hfmm_k6_fixed_data <- hfmm_k6_fixed_data[hfmm_k6_fixed_data$variable == "k5",]
+personalised_hfmm_k6_fixed_data <- personalised_hfmm_k6_fixed_data[personalised_hfmm_k6_fixed_data$variable == "k5",]
+```
+
+```{r}
+# Function to extract k5 values
+extract_k5 <- function(data) {
+  data %>%
+    filter(variable == "k5") %>%
+    select(ID, value) %>%
+    rename(k5 = value)
+}
+```
+
+```{r}
+# Function to standardize IDs
+standardize_id <- function(id) {
+  gsub("^(PS|Ex)", "", id)
+}
+```
+
+```{r}
+# Extract k5 values from each dataset
+cgm_k5 <- extract_k5(comp_cgm_data)
+ogtt_k5 <- extract_k5(comp_ogtt_data)
+hfmm_k5 <- extract_k5(comp_hfmm_data)
+hfmm_k6_fixed_k5 <- extract_k5(hfmm_k6_fixed_data)
+personalised_hfmm_k6_fixed_k5 <- extract_k5(personalised_hfmm_k6_fixed_data)
+```
+
+```{r}
+# Apply standardization to all datasets
+comp_clamp_data$ID <- standardize_id(comp_clamp_data$ID)
+cgm_k5$ID <- standardize_id(cgm_k5$ID)
+ogtt_k5$ID <- standardize_id(ogtt_k5$ID)
+hfmm_k5$ID <- standardize_id(hfmm_k5$ID)
+hfmm_k6_fixed_k5$ID <- standardize_id(hfmm_k6_fixed_k5$ID)
+personalised_hfmm_k6_fixed_k5$ID <- standardize_id(personalised_hfmm_k6_fixed_k5$ID)
+```
+
+```{r}
+# Merge k5 values
+k5_combined <- cgm_k5 %>%
+  full_join(ogtt_k5, by = "ID", suffix = c("_cgm", "_ogtt")) %>%
+  full_join(hfmm_k5, by = "ID") %>%
+  full_join(hfmm_k6_fixed_k5, by = "ID", suffix = c("_hfmm", "_hfmm_k6_fixed")) %>%
+  full_join(personalised_hfmm_k6_fixed_k5, by = "ID") %>%
+  rename(k5_personalised_hfmm_k6_fixed = k5)
+```
+
+```{r}
+# Option 1: Using base R subsetting
+# Correct way to select columns using base R indexing
+clamp_metrics <- comp_clamp_data[, c("ID", 
+                                     "clamp_M_value", 
+                                     "Matsuda_CI1", 
+                                     "HOMA.IR_CI1",
+                                     "HOMA_beta_CI1")]
+```
+
+```{r}
+# Merge with clamp data
+final_data <- k5_combined %>%
+  left_join(clamp_metrics, by = "ID")
+```
+
+```{r}
+# Calculate correlations
+cor_matrix <- final_data %>%
+  select(-ID) %>%  # Exclude ID column
+  cor(method = "spearman", use = "pairwise.complete.obs")
+```
+
+```{r}
+# Remove any NA or infinite values
+cor_matrix[is.na(cor_matrix) | !is.finite(cor_matrix)] <- 0
+```
+
+```{r}
+# Visualize correlations
+png("k5_correlations.png", width = 1000, height = 800)
+corrplot(cor_matrix, method = "color", type = "upper", 
+         tl.col = "black", tl.srt = 45, addCoef.col = "black",
+         is.corr = FALSE)
+dev.off()
+```
+
+```{r}
+# Scatter plots
+plot_scatter <- function(x, y, x_label, y_label) {
+  ggplot(final_data, aes_string(x = x, y = y)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "red") +
+    labs(x = x_label, y = y_label) +
+    theme_minimal() +
+    ggtitle(paste("n =", sum(complete.cases(final_data[,c(x,y)]))))
+}
+
+# Generate and save scatter plots
+plot_combinations <- combn(c("k5_cgm", "k5_ogtt", "k5_hfmm", "k5_hfmm_k6_fixed", "k5_personalised_hfmm_k6_fixed", "clamp_M_value"), 2, simplify = FALSE)
+
+plots <- lapply(plot_combinations, function(pair) {
+  plot_scatter(pair[1], pair[2], pair[1], pair[2])
+})
+```
+
+```{r}
+plots
+```
+```{r}
+# Save plots
+for (i in seq_along(plots)) {
+  ggsave(paste0("scatter_plot_", i, ".png"), plots[[i]], width = 8, height = 6)
+}
+```
+
+```{r}
+# Print summary statistics
+summary_stats <- final_data %>%
+  select(k5_cgm, k5_ogtt, k5_hfmm, k5_hfmm_k6_fixed, k5_personalised_hfmm_k6_fixed, clamp_M_value) %>%
+  summary()
+
+print(summary_stats)
+
+# Print correlation matrix
+print(cor_matrix)
+```
+```{r}
+# Calculate correlationsS
+hfmm_cor_matrix <- final_data %>%
+  select(k5_hfmm, k5_hfmm_k6_fixed, k5_personalised_hfmm_k6_fixed, clamp_M_value) %>%
+  cor(method = "spearman", use = "pairwise.complete.obs")
+```
+
+```{r}
+print(hfmm_cor_matrix)
+```
+```{r}
+# Print summary statistics
+summary_stats <- final_data %>%
+  select(-ID) %>%  # Exclude ID column
+  summary()
+```
+
+```{r}
+print(cor_matrix)
+```
+```{r}
+# Calculate correlationsS
+hfmm_cor_matrix <- final_data %>%
+  select(cgm = k5_cgm, ogtt = k5_ogtt, hfmm = k5_hfmm, k6_fixed = k5_hfmm_k6_fixed, uniq_k6_fixed = k5_personalised_hfmm_k6_fixed, Matsuda = Matsuda_CI1, HOMA_IR = HOMA.IR_CI1, HOMA_beta = HOMA_beta_CI1, clamp_M_value) %>%
+  cor(method = "spearman", use = "pairwise.complete.obs")
+```
+
+```{r}
+print(hfmm_cor_matrix)
+```
+```{r}
+# Create a formatted correlation matrix
+corrplot(hfmm_cor_matrix, method = "color", type = "upper", 
+         order = "hclust", # This orders the variables by hierarchical clustering
+         addCoef.col = "black", # Add correlation coefficients
+         tl.col = "black", tl.srt = 45, # Text label color and rotation
+         diag = FALSE, # Remove diagonal (self-correlations)
+         col = colorRampPalette(c("#6D9EC1", "white", "#E46726"))(200),
+         cl.lim = c(-1, 1), # Color limit from -1 to 1
+         number.cex = 0.7) # Size of the correlation coefficients
+```
+

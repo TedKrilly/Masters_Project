@@ -1,0 +1,498 @@
+---
+title: "CGM_trad_metrics"
+author: "Paul O'Dwyer"
+date: "2024-08-05"
+output: html_document
+---
+################################################################################
+################################################################################
+################################################################################
+
+CGM Metrics Analysis for Multiple Individuals
+```{r}
+# Load required libraries
+library(tidyverse)
+library(stats)
+library(dplyr)
+library(lubridate)
+library(iglu)
+library(ggplot2)
+```
+
+```{r}
+# File 2: CGM data (including MAGE)
+path <- file.choose()
+long_data <- read.csv(path, sep=",", header = TRUE)
+```
+
+```{r}
+# Filter the data by Center
+center_filtered_data <- filter(long_data, Center == "UM")
+# Subset the columns
+cgm_long_data <- data.frame(
+  id = center_filtered_data$Participant,
+  period = center_filtered_data$Period,
+  gl = center_filtered_data$`Sensor.Glucose..mmol.L`,
+  time = center_filtered_data$Timestamp_w_daylight_saving
+)
+```
+
+```{r}
+# Ensure the 'time' column is in POSIXct date-time format
+cgm_long_data$time <- as.POSIXct(cgm_long_data$time, format = "%Y-%m-%d %H:%M", tz="UTC")
+```
+
+```{r}
+cgm_long_id_date_sorted <- cgm_long_data %>% 
+  arrange(id, time)
+```
+
+
+```{r}
+# Function to calculate metrics for a single day
+calculate_daily_metrics <- function(day_data) {
+  tryCatch({
+    mage_result <- mage(day_data)$MAGE
+    peak_glucose <- max(day_data$gl, na.rm = TRUE)
+    time_to_peak <- day_data$time[which.max(day_data$gl)]
+    
+    c(
+      mean_glucose = mean(day_data$gl, na.rm = TRUE),
+      variance_glucose = var(day_data$gl, na.rm = TRUE),
+      mage = mage_result,
+      peak_glucose = peak_glucose,
+      time_to_peak = as.character(time_to_peak)
+    )
+  }, error = function(e) {
+    c(
+      mean_glucose = NA_real_,
+      variance_glucose = NA_real_,
+      mage = NA_real_,
+      peak_glucose = NA_real_,
+      time_to_peak = NA_character_
+    )
+  })
+}
+```
+
+```{r}
+# Function to calculate metrics for each individual
+calculate_individual_metrics <- function(individual_data) {
+  # Split data by day
+  daily_data <- split(individual_data, as.Date(individual_data$time))
+  
+  # Calculate metrics for each day
+  daily_metrics <- lapply(daily_data, calculate_daily_metrics)
+  
+  # Combine daily metrics
+  metrics_df <- do.call(rbind, daily_metrics)
+  
+  # Add date column
+  metrics_df <- as.data.frame(metrics_df)
+  metrics_df$date <- names(daily_data)
+  
+  return(metrics_df)
+}
+```
+
+# Several issues says some the dates data is not sorted even though it is. 
+# Says there are duplicate values for some times, only takes final value, the values generally are very similar so dont really care
+# The beginning day is not a full day so could discount this.
+
+```{r}
+# Process all individuals
+all_metrics <- cgm_long_id_date_sorted %>%
+  group_by(id, period) %>%
+  do(metrics = calculate_individual_metrics(.)) %>%
+  unnest(metrics)
+```
+
+```{r}
+# Ensure date column is in proper date format
+all_metrics$date <- as.Date(all_metrics$date)
+```
+
+```{r}
+# Function to safely convert to numeric
+safe_as_numeric <- function(x) {
+  as.numeric(as.character(x))
+}
+```
+
+```{r}
+# Clean and convert data types
+all_metrics <- all_metrics %>%
+  mutate(across(c(mean_glucose, variance_glucose, mage, peak_glucose), 
+                ~safe_as_numeric(.)))
+```
+
+```{r}
+# Check for any remaining non-numeric values
+non_numeric_check <- all_metrics %>%
+  summarise(across(c(mean_glucose, variance_glucose, mage, peak_glucose), 
+                   ~sum(is.na(.) & !is.na(.))))
+
+print("Number of non-numeric values after conversion:")
+print(non_numeric_check)
+```
+
+```{r}
+# Remove rows with NA values in key metrics
+all_metrics_clean <- all_metrics %>%
+  filter(!is.na(mean_glucose) & !is.na(variance_glucose) & !is.na(mage) & !is.na(peak_glucose))
+```
+
+```{r}
+# Summarize metrics for each individual and period
+summary_metrics <- all_metrics %>%
+  group_by(id, period) %>%
+  summarise(
+    mean_glucose = mean(mean_glucose, na.rm = TRUE),
+    mean_variance = mean(variance_glucose, na.rm = TRUE),
+    mean_mage = mean(mage, na.rm = TRUE),
+    max_peak_glucose = max(peak_glucose, na.rm = TRUE),
+    days_recorded = n_distinct(date),
+    .groups = 'drop'
+  )
+```
+
+```{r}
+# Print summary metrics
+print(summary_metrics)
+
+# Save the results to a CSV file
+write.csv(summary_metrics, "cgm_summary_metrics.csv", row.names = FALSE)
+
+# Create daily metrics dataset
+daily_metrics <- all_metrics %>%
+  select(id, period, date, mean_glucose, variance_glucose, mage, peak_glucose)
+
+# Print first few rows of daily metrics
+print(head(daily_metrics))
+
+# Save daily metrics to a CSV
+write.csv(daily_metrics, "cgm_daily_metrics.csv", row.names = FALSE)
+```
+
+################################################################################
+################################################################################
+################################################################################
+
+Correlation Analysis
+
+```{r}
+# Load required libraries if not already loaded
+library(tidyverse)
+library(corrplot)
+
+# File 2: k5 data
+path <- file.choose()
+k5_data <- read.csv(path, sep=",", header = TRUE)
+```
+
+```{r}
+# Subset the columns
+k5_data <- data.frame(
+  id = k5_data$ID,
+  k5 = k5_data$value
+)
+```
+
+```{r}
+# File 3: Clamp data
+path <- file.choose()
+clamp_data <- read.csv(path, sep=",", header = TRUE)
+```
+
+```{r}
+# Subset the columns
+clamp_data <- data.frame(
+  id = clamp_data$ID,
+  clamp_M_value = clamp_data$clamp_M_value,
+  Matsuda_CIW1 = clamp_data$Matsuda_CI1,
+  Matsuda_CIW2 = clamp_data$Matsuda_CI2,
+  HOMA.IR_CIW1 = clamp_data$HOMA.IR_CI1,
+  HOMA.IR_CIW2 = clamp_data$HOMA.IR_CI2,
+  HOMA_beta_CIW1 = clamp_data$HOMA_beta_CI1,
+  HOMA_beta_CIW2 = clamp_data$HOMA_beta_CI2,
+  IGI_CIW1 = clamp_data$IGI_CI1,
+  IGI_CIW2 = clamp_data$IGI_CI2
+)
+```
+
+Transforming Erdos Clamp so that there is ordering by Period
+```{r}
+# Step 1: Create CIW1 dataset
+data_ciw1 <- data.frame(
+  id = clamp_data$id,
+  clamp_M_value = clamp_data$clamp_M_value,
+  Matsuda = clamp_data$Matsuda_CIW1,
+  HOMA_IR = clamp_data$HOMA.IR_CIW1,
+  HOMA_beta = clamp_data$HOMA_beta_CIW1,
+  IGI = clamp_data$IGI_CIW1 
+) %>%
+  mutate(period = "CIW1")
+
+# Step 2: Create CIW2 dataset
+data_ciw2 <- data.frame(
+  id = clamp_data$id,
+  clamp_M_value = clamp_data$clamp_M_value,
+  Matsuda = clamp_data$Matsuda_CIW2,
+  HOMA_IR = clamp_data$HOMA.IR_CIW2,
+  HOMA_beta = clamp_data$HOMA_beta_CIW2,
+  IGI = clamp_data$IGI_CIW2 
+) %>%
+  mutate(period = "CIW2")
+
+# Step 3: Combine CIW1 and CIW2 datasets
+final_data <- bind_rows(data_ciw1, data_ciw2)
+
+# Step 4: Arrange by id and period
+final_data <- final_data %>% arrange(id, period)
+
+# Drop first two rows
+clamp_data <- final_data %>% slice(-1, -2)
+```
+
+```{r}
+# Function to remove prefix from id
+remove_prefix <- function(id) {
+  ifelse(grepl("^(Ex|PS)", id), sub("^(Ex|PS)", "", id), id)
+}
+```
+
+```{r}
+# Print sample of ids before modification
+print("Sample of ids in clamp_data before modification:")
+print(head(clamp_data$id))
+print("Sample of ids in k5_data before modification:")
+print(head(k5_data$id))
+print("Sample of ids in summary_metrics before modification:")
+print(head(summary_metrics$id))
+```
+```{r}
+# Remove prefixes from both datasets
+clamp_data$id <- remove_prefix(clamp_data$id)
+k5_data$id <- remove_prefix(k5_data$id)
+summary_metrics$id <- remove_prefix(summary_metrics$id)
+```
+
+```{r}
+# Merge k5 values with summary metrics
+k5_summary_metrics_data <- summary_metrics %>%
+  left_join(k5_data, by = "id")
+
+# Merge clamp values with summary metrics & k5 values
+merged_data <- k5_summary_metrics_data %>%
+  left_join(clamp_data, by = "id")
+```
+```{r}
+filtered_data <- merged_data[merged_data$period.x == merged_data$period.y, ]
+filtered_data$period.y <- NULL
+names(filtered_data)[names(filtered_data) == "period.x"] <- "period"
+final_data <- unique(filtered_data)
+
+# Check the result
+print(head(final_data))
+print(nrow(final_data))
+```
+
+```{r}
+# Check for any missing values after merging
+missing_after_merge <- sum(is.na(merged_data$k5))
+print(paste("Number of missing k5 values after merging:", missing_after_merge))
+
+missing_after_merge <- sum(is.na(merged_data$clamp_M_value))
+print(paste("Number of missing clamp_M_values after merging:", missing_after_merge))
+```
+
+```{r}
+# If there are still missing values, let's investigate
+if (missing_after_merge > 0) {
+  # Identify ids that didn't match
+  unmatched_ids <- summary_metrics$id[!summary_metrics$id %in% k5_data$id]
+  print("Sample of unmatched ids:")
+  print(head(unmatched_ids))
+  
+  print("Number of unique ids in summary_metrics:")
+  print(length(unique(summary_metrics$id)))
+  
+  print("Number of unique ids in k5_data:")
+  print(length(unique(k5_data$id)))
+  
+  print("Sample of ids in summary_metrics:")
+  print(head(summary_metrics$id))
+  
+  print("Sample of ids in k5_data:")
+  print(head(k5_data$id))
+}
+```
+
+```{r}
+final_data[is.na(final_data)] <- NaN
+```
+
+```{r}
+# Remove rows with missing k5 values for the correlation analysis
+merged_data_complete <- final_data %>% 
+  filter(!is.na(k5))
+
+merged_data_complete <- merged_data_complete %>%
+  filter(!is.na(clamp_M_value))
+```
+
+```{r}
+threshold <- 0.0000001  # threshold as this is a value for when it deviates
+filter_data <- merged_data_complete %>% filter(k5 > threshold)
+```
+
+Correlation Analysis
+```{r}
+# Correlation Analysis
+# cor_with_clamp <- cor(filter_data[c("clamp_M_value", "k5", "mean_mage")], use = "pairwise.complete.obs")
+
+cor_with_clamp <- cor(filter_data[c("clamp_M_value", "k5", "mean_mage")], 
+                      method = "spearman")
+
+print("Correlations with CLAMP M-value:")
+print(cor_with_clamp["clamp_M_value", ])
+```
+
+```{r}
+# Visualization
+ggplot(filter_data, aes(x = k5, y = clamp_M_value)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  labs(title = "K5 vs CLAMP M-value",
+       x = "K5", y = "CLAMP M-value") +
+  theme_minimal()
+ggsave("k5_vs_clamp.png", width = 8, height = 6)
+
+ggplot(filter_data, aes(x = mean_mage, y = clamp_M_value)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "MAGE vs CLAMP M-value",
+       x = "MAGE", y = "CLAMP M-value") +
+  theme_minimal()
+ggsave("mage_vs_clamp.png", width = 8, height = 6)
+```
+Investigate the correlation between CLAMP and all metrics
+```{r}
+# List all metrics to correlate with CLAMP
+metrics <- c("mean_glucose", "mean_variance", "mean_mage", "max_peak_glucose", 
+             "k5", "Matsuda", "HOMA_IR", "HOMA_beta", "IGI")
+
+# Ensure all columns are numeric
+merged_data <- merged_data %>%
+  mutate(across(c(all_of(metrics), clamp_M_value), ~as.numeric(as.character(.))))
+
+# Remove rows only where CLAMP value is NA
+merged_data <- merged_data %>%
+  filter(!is.na(clamp_M_value))
+
+# Calculate correlations
+cor_with_clamp <- cor(merged_data[c("clamp_M_value", all_of(metrics))], 
+                      method = "spearman", use = "pairwise.complete.obs")
+
+# Extract correlations with CLAMP
+clamp_correlations <- cor_with_clamp["clamp_M_value", metrics]
+
+# Create a data frame of correlations
+correlation_df <- data.frame(
+  Metric = names(clamp_correlations),
+  Correlation = as.numeric(clamp_correlations)
+) %>%
+  arrange(desc(abs(Correlation)))
+
+print("Correlations with CLAMP M-value:")
+print(correlation_df)
+
+# Visualize correlations
+ggplot(correlation_df, aes(x = reorder(Metric, abs(Correlation)), y = Correlation)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Correlations with CLAMP M-value", x = "Metric", y = "Correlation") +
+  theme_minimal()
+
+ggsave("all_correlations_with_clamp.png", width = 10, height = 6)
+
+# Scatter plots for each metric
+for (metric in metrics) {
+  p <- ggplot(merged_data, aes_string(x = metric, y = "clamp_M_value")) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    labs(title = paste(metric, "vs CLAMP M-value"),
+         x = metric, y = "CLAMP M-value") +
+    theme_minimal()
+  
+  print(p)
+  ggsave(paste0(metric, "_vs_clamp.png"), width = 8, height = 6)
+}
+```
+Correlations between K5 and the metrics
+```{r}
+# List all metrics to correlate with CLAMP
+k5_metrics <- c("mean_glucose", "mean_variance", "mean_mage", "max_peak_glucose", 
+             "clamp_M_value", "Matsuda", "HOMA_IR", "HOMA_beta", "IGI")
+
+# Ensure all columns are numeric
+k5_merged_data <- merged_data %>%
+  mutate(across(c(all_of(k5_metrics), k5), ~as.numeric(as.character(.))))
+
+# Remove rows only where CLAMP value is NA
+k5_merged_data <- k5_merged_data %>%
+  filter(!is.na(k5))
+
+# Calculate correlations
+cor_with_k5 <- cor(k5_merged_data[c("k5", all_of(k5_metrics))], 
+                      method = "spearman", use = "pairwise.complete.obs")
+
+# Extract correlations with CLAMP
+k5_correlations <- cor_with_k5["k5", k5_metrics]
+
+# Create a data frame of correlations
+k5_correlation_df <- data.frame(
+  Metric = names(k5_correlations),
+  Correlation = as.numeric(k5_correlations)
+) %>%
+  arrange(desc(abs(Correlation)))
+
+print("Correlations with k5:")
+print(k5_correlation_df)
+
+# Visualize correlations
+ggplot(k5_correlation_df, aes(x = reorder(Metric, abs(Correlation)), y = Correlation)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Correlations with k5", x = "Metric", y = "Correlation") +
+  theme_minimal()
+
+ggsave("all_correlations_with_k5.png", width = 10, height = 6)
+
+# Scatter plots for each metric
+for (metric in k5_metrics) {
+  p <- ggplot(k5_merged_data, aes_string(x = metric, y = "k5")) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    labs(title = paste(metric, "vs k5"),
+         x = metric, y = "k5") +
+    theme_minimal()
+  
+  print(p)
+  ggsave(paste0(metric, "_vs_k5.png"), width = 8, height = 6)
+}
+```
+
+
+
+################################################################################
+################################################################################
+################################################################################
+
+```{r}
+path <- file.choose()
+k5_data <- read.csv(path)
+```
+
+
+

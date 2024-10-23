@@ -1,0 +1,242 @@
+---
+title: "Untitled"
+author: "Paul O'Dwyer"
+date: "2024-08-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load required libraries
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+```
+
+```{r}
+# Read the datasets
+actual_data <- read.csv("C://Users//paulo//Desktop//Task_Split//HFMM//clean_mmt_glucose_and_insulin_data.csv")
+original_residuals <- read.csv("C://Users//paulo//Desktop//Task_Split//HFMM//HFMMresiduals.csv")
+fixed_estimates <- read.csv("C://Users//paulo//Desktop//Task_Split//HFMM_k6_fixed//HFMM_k6_residuals.csv")
+personalised_estimates <- read.csv("C://Users//paulo//Desktop//Task_Split//HFMM_k6_fixed//Personalisedk6_HFMM//HFMM_personalised_k6_OGTTresiduals.csv")
+
+str(actual_data)
+head(actual_data)
+str(residuals_data)
+head(residuals_data)
+
+# Inspect the structure of the estimates files
+str(fixed_estimates)
+str(personalised_estimates)
+```
+
+```{r}
+# Prepare the actual data
+actual_data <- actual_data %>%
+  select(ID, metab, VAL, time) %>%
+  rename(actual = VAL)
+
+# Prepare the original HFMM residuals data
+original_residuals_long <- original_residuals %>%
+  pivot_longer(cols = c("X0", "X30", "X60", "X120", "X180", "X240"), 
+               names_to = "time", 
+               values_to = "original_residual") %>%
+  mutate(time = as.integer(substr(time, 2, nchar(time))))
+
+# Prepare the fixed estimates data
+fixed_estimates_long <- fixed_estimates %>%
+  pivot_longer(cols = c("X0", "X30", "X60", "X120", "X180", "X240"), 
+               names_to = "time", 
+               values_to = "fixed_residual") %>%
+  mutate(time = as.integer(substr(time, 2, nchar(time))))
+
+# Prepare the personalised estimates data
+personalised_estimates_long <- personalised_estimates %>%
+  pivot_longer(cols = c("X0", "X30", "X60", "X120", "X180", "X240"), 
+               names_to = "time", 
+               values_to = "personalised_residual") %>%
+  mutate(time = as.integer(substr(time, 2, nchar(time))))
+
+# Combine all datasets
+merged_data <- actual_data %>%
+  left_join(original_residuals_long, by = c("ID", "metab", "time")) %>%
+  left_join(fixed_estimates_long, by = c("ID", "metab", "time")) %>%
+  left_join(personalised_estimates_long, by = c("ID", "metab", "time")) %>%
+  mutate(
+    original_predicted = actual + original_residual,
+    fixed_predicted = actual + fixed_residual,
+    personalised_predicted = actual + personalised_residual
+  )
+```
+
+```{r}
+# Function to check if a prediction is acceptable
+is_acceptable <- function(actual, predicted, tolerance) {
+  abs((predicted - actual) / actual) <= tolerance
+}
+
+# Apply the function and calculate percentages for all three models
+results <- merged_data %>%
+  group_by(ID, metab) %>%
+  summarise(
+    original_acceptable_count = sum(
+      ifelse(metab == "gluc", 
+             is_acceptable(actual, original_predicted, 0.05),
+             is_acceptable(actual, original_predicted, 0.10))
+    ),
+    fixed_acceptable_count = sum(
+      ifelse(metab == "gluc", 
+             is_acceptable(actual, fixed_predicted, 0.05),
+             is_acceptable(actual, fixed_predicted, 0.10))
+    ),
+    personalised_acceptable_count = sum(
+      ifelse(metab == "gluc", 
+             is_acceptable(actual, personalised_predicted, 0.05),
+             is_acceptable(actual, personalised_predicted, 0.10))
+    ),
+    total_count = n(),
+    original_percent_acceptable = original_acceptable_count / total_count * 100,
+    fixed_percent_acceptable = fixed_acceptable_count / total_count * 100,
+    personalised_percent_acceptable = personalised_acceptable_count / total_count * 100,
+    mean_actual = mean(actual),
+    mean_original_predicted = mean(original_predicted),
+    mean_fixed_predicted = mean(fixed_predicted),
+    mean_personalised_predicted = mean(personalised_predicted),
+    mean_original_difference = mean(original_predicted - actual),
+    mean_fixed_difference = mean(fixed_predicted - actual),
+    mean_personalised_difference = mean(personalised_predicted - actual),
+    .groups = "drop"
+  )
+```
+
+```{r}
+# Calculate overall percentages
+overall_results <- results %>%
+  group_by(metab) %>%
+  summarise(
+    original_total_acceptable = sum(original_acceptable_count),
+    fixed_total_acceptable = sum(fixed_acceptable_count),
+    personalised_total_acceptable = sum(personalised_acceptable_count),
+    total_count = sum(total_count),
+    original_overall_percent = original_total_acceptable / total_count * 100,
+    fixed_overall_percent = fixed_total_acceptable / total_count * 100,
+    personalised_overall_percent = personalised_total_acceptable / total_count * 100,
+    original_mean_percent_acceptable = mean(original_percent_acceptable),
+    fixed_mean_percent_acceptable = mean(fixed_percent_acceptable),
+    personalised_mean_percent_acceptable = mean(personalised_percent_acceptable),
+    original_sd_percent_acceptable = sd(original_percent_acceptable),
+    fixed_sd_percent_acceptable = sd(fixed_percent_acceptable),
+    personalised_sd_percent_acceptable = sd(personalised_percent_acceptable),
+    original_mean_difference = mean(mean_original_difference),
+    fixed_mean_difference = mean(mean_fixed_difference),
+    personalised_mean_difference = mean(mean_personalised_difference)
+  )
+```
+
+```{r}
+# Count subjects with acceptable fits (>=80% acceptable predictions)
+acceptable_subjects <- results %>%
+  group_by(metab) %>%
+  summarise(
+    original_acceptable_subjects = sum(original_percent_acceptable >= 80),
+    fixed_acceptable_subjects = sum(fixed_percent_acceptable >= 80),
+    personalised_acceptable_subjects = sum(personalised_percent_acceptable >= 80),
+    total_subjects = n_distinct(ID),
+    original_percent_acceptable_subjects = original_acceptable_subjects / total_subjects * 100,
+    fixed_percent_acceptable_subjects = fixed_acceptable_subjects / total_subjects * 100,
+    personalised_percent_acceptable_subjects = personalised_acceptable_subjects / total_subjects * 100
+  )
+```
+
+```{r}
+# Print results
+print("Overall Results:")
+print(overall_results)
+```
+
+```{r}
+print("Acceptable Subjects:")
+print(acceptable_subjects)
+```
+
+```{r}
+# Visualizations
+# Overall percentages comparison
+overall_results_long <- overall_results %>%
+  select(metab, original_overall_percent, fixed_overall_percent, personalised_overall_percent) %>%
+  pivot_longer(cols = c(original_overall_percent, fixed_overall_percent, personalised_overall_percent),
+               names_to = "model", 
+               values_to = "overall_percent")
+
+ggplot(overall_results_long, aes(x = metab, y = overall_percent, fill = model)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  geom_text(aes(label = sprintf("%.1f%%", overall_percent)), 
+            position = position_dodge(width = 0.7), 
+            vjust = -0.5, size = 3) +
+  labs(title = "Overall Percentage of Acceptable Predictions",
+       subtitle = "Comparison of Original, Fixed, and Personalised HFMM Models",
+       x = "Metabolite", y = "Percentage of Acceptable Predictions") +
+  scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 20)) +
+  scale_fill_manual(values = c("steelblue", "darkgreen", "orange"),
+                    labels = c("Original", "Fixed", "Personalised")) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5),
+        legend.title = element_blank())
+
+ggsave("hfmm_overall_percentage_comparison_plot.png", width = 12, height = 6, dpi = 300)
+```
+
+```{r}
+# Distribution of percent acceptable by metabolite and model
+results_long <- results %>%
+  select(ID, metab, original_percent_acceptable, fixed_percent_acceptable, personalised_percent_acceptable) %>%
+  pivot_longer(cols = c(original_percent_acceptable, fixed_percent_acceptable, personalised_percent_acceptable),
+               names_to = "model", 
+               values_to = "percent_acceptable")
+
+ggplot(results_long, aes(x = metab, y = percent_acceptable, fill = model)) +
+  geom_boxplot() +
+  labs(title = "Distribution of Acceptable Predictions",
+       subtitle = "Comparison of Original, Fixed, and Personalised HFMM Models",
+       x = "Metabolite", y = "Percentage of Acceptable Predictions") +
+  scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 20)) +
+  scale_fill_manual(values = c("lightblue", "lightgreen", "lightsalmon"),
+                    labels = c("Original", "Fixed", "Personalised")) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5),
+        legend.title = element_blank())
+
+ggsave("hfmm_distribution_boxplot_comparison.png", width = 12, height = 6, dpi = 300)
+```
+```{r}
+# Assuming 'results' dataframe is already created from the previous code
+
+# Calculate mean percentage of acceptable predictions for each subject across all models
+subject_means <- results %>%
+  rowwise() %>%
+  mutate(mean_percent_acceptable = mean(c(original_percent_acceptable, 
+                                          fixed_percent_acceptable, 
+                                          personalised_percent_acceptable))) %>%
+  ungroup()
+
+# Calculate overall mean percentage of acceptable predictions
+overall_mean <- mean(subject_means$mean_percent_acceptable)
+
+# Find the subject closest to the overall mean
+representative_subject <- subject_means %>%
+  mutate(difference_from_mean = abs(mean_percent_acceptable - overall_mean)) %>%
+  arrange(difference_from_mean) %>%
+  slice(1)
+
+# Print the representative subject
+print("Representative Subject:")
+print(representative_subject)
+```
+

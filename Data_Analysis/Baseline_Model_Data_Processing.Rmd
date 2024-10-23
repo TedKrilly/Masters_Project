@@ -1,0 +1,63 @@
+---
+title: "Baseline Model Data Processing"
+author: "Paul O'Dwyer"
+date: "2024-08-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+# CGMestimates
+path <- file.choose()
+cgm_estimates <- read.csv(path)
+```
+
+```{r}
+# HFMM data
+path <- file.choose()
+HFMM_data <- read.csv(path)
+```
+
+```{r}
+# Check for missing values
+HFMM_missing_values <- is.na(HFMM_data)
+
+# Print the rows with missing values
+print(HFMM_missing_values[which(rowSums(missing_values) > 0), ])
+```
+
+```{r}
+# Check for missing values
+cgm_estimates_missing_values <- is.na(cgm_estimates)
+
+# Print the rows with missing values
+print(cgm_estimates_missing_values[which(rowSums(cgm_estimates_missing_values) > 0), ])
+
+# Remove rows with missing values
+cgm_estimates_clean <- na.omit(cgm_estimates)
+
+print(cgm_estimates_clean)
+```
+```{r}
+# Find the common IDs between the two data frames
+common_ids <- intersect(cgm_estimates_clean$ID, HFMM_data$ID)
+print(common_ids)
+```
+
+```{r}
+# Filter the data frames to include only the common IDs
+cgm_estimates_filtered <- subset(cgm_estimates_clean, ID %in% common_ids)
+HFMM_data_filtered <- subset(HFMM_data, ID %in% common_ids)
+```
+
+```{r}
+# Save the filtered data frames to CSV files
+write.csv(cgm_estimates_filtered, "cgm_estimates_filtered.csv", row.names = FALSE)
+write.csv(HFMM_data_filtered, "HFMM_data_filtered.csv", row.names = FALSE)
+```
+

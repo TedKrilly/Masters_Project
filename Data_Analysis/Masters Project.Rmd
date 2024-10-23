@@ -1,0 +1,480 @@
+---
+title: "Project"
+author: "Paul O'Dwyer"
+date: "2024-07-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+install.packages("gridExtra")
+```
+
+
+```{r}
+# Load required libraries
+library(tidyverse)
+library(ggplot2)
+```
+
+```{r}
+path <- file.choose()
+ogtt_data <- read.csv(path)
+
+path <- file.choose()
+cgm_data <- read.csv(path)
+```
+
+First this section is comparing the OGTT and CGM calibrated fits on the HFMM data, the baseline comparison essentially. The fits are evaluated
+using the Sum of Square errors with the fact that the CGM data has additional data points compared to OGTT resolved by use of Mean Squared Error (MSE). A threshold is also created for "bad fits" as the top 10% of MSE values for each combination of Measure and Metric.
+
+The below criteria were derived from the Erdos 2024 paper.
+
+1."Bad fit" is defined using the Erdos 2024 definition as personalised models with a mean squared error (MSE) in glucose simulation above 1.5
+
+2. Comparison method:
+Compared number of bad fits between models calibrated on plasma glucose and those calibrated on CGM glucose.
+
+```{r}
+# Reshape OGTT data
+ogtt_long <- ogtt_data %>%
+  pivot_longer(cols = c("X15", "X30", "X45", "X60", "X90", "X120"),
+               names_to = "Time",
+               values_to = "Residual") %>%
+  mutate(Measure = "OGTT")
+
+# Reshape CGM data
+cgm_long <- cgm_data %>%
+  pivot_longer(cols = c("X5", "X10", "X15", "X20", "X25", "X30", "X35", "X40", "X45", "X50", "X55", 
+                        "X60", "X65", "X70", "X75", "X80", "X85", "X90", "X95", "X100", "X105", "X110", 
+                        "X115", "X120", "X125"),
+               names_to = "Time",
+               values_to = "Residual") %>%
+  mutate(Measure = "CGM")
+```
+
+```{r}
+# Combine OGTT and CGM data
+combined_data <- bind_rows(ogtt_long, cgm_long)
+
+# Calculate MSE
+mse_data <- combined_data %>%
+  group_by(ID, metab, Condition, Measure) %>%
+  summarise(Value = mean(Residual^2, na.rm = TRUE),
+            n_points = n()) %>%
+  ungroup()
+
+# Rename columns and arrange data
+data <- mse_data %>%
+  rename(ID_Condition = ID,
+         Metric = metab) %>%
+  mutate(Metric = case_when(
+    Metric == "gluc" ~ "glucose_mse",
+    Metric == "ins" ~ "insulin_mse",
+    TRUE ~ Metric
+  )) %>%
+  select(ID_Condition, Measure, Metric, Value, n_points)
+```
+
+
+2. Difference in MSE Distribution:
+
+We can also directly compare the distribution of MSE values between CGM and OGTT:
+
+Visualize and quantify the differences in MSE distributions between CGM and OGTT data.
+```{r}
+# Calculate summary statistics including median and IQR, handling NAs
+summary_stats <- data %>%
+  group_by(Measure, Metric) %>%
+  summarize(
+    mean_MSE = mean(Value, na.rm = TRUE),
+    median_MSE = median(Value, na.rm = TRUE),
+    sd_MSE = sd(Value, na.rm = TRUE),
+    IQR_MSE = IQR(Value, na.rm = TRUE),
+    Q1 = quantile(Value, 0.25, na.rm = TRUE),
+    Q3 = quantile(Value, 0.75, na.rm = TRUE),
+    n = sum(!is.na(Value)),
+    n_missing = sum(is.na(Value))
+  )
+
+# Print summary statistics
+print(summary_stats)
+
+# Create density plots of MSE for each Measure and Metric
+density_plot <- ggplot(data, aes(x = Value, fill = Measure)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~ Metric, scales = "free") +
+  scale_x_log10() +  # Use log scale if MSE values have a wide range
+  labs(
+    title = "Distribution of MSE Values: CGM vs Venous in 3-parameter E-DES Model",
+    x = "Mean Squared Error (log scale)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(color = "white"),   # Set title text to white
+    axis.title.x = element_text(color = "white"), # Set x-axis label text to white
+    axis.title.y = element_text(color = "white"), # Set y-axis label text to white
+    axis.text = element_text(color = "white"),    # Set axis text to white
+    strip.text = element_text(color = "white"),   # Set facet labels to white
+    legend.text = element_text(color = "white"),  # Set legend text to white
+    legend.title = element_text(color = "white")  # Set legend title to white
+  )
+
+# Update the legend labels
+density_plot <- density_plot + 
+  scale_fill_discrete(labels = c("CGM" = "CGM", "OGTT" = "Venous"))
+
+print(density_plot)
+
+# Save the density plot
+ggsave("mse_distribution_comparison.png", density_plot, width = 10, height = 6)
+```
+
+```{r}
+n_ids_final <- data %>% 
+  distinct(ID, Measure) %>% 
+  group_by(Measure) %>%
+  summarize(n_ids = n())
+
+print(n_ids_final)
+```
+
+3. Paired Comparisons: 
+
+Since we have CGM and OGTT data for the same subjects, we can do paired comparisons:
+
+This will perform a statistical test in this case a t-test to determine if there's a significant difference in the MSE between CGM and OGTT
+
+```{r}
+# If not, first reshape your data:
+data_wide <- data %>%
+  pivot_wider(id_cols = c(ID_Condition, Metric), 
+              names_from = Measure, 
+              values_from = MSE)
+
+# Calculate difference and perform paired t-test
+data_wide <- data_wide %>%
+  mutate(MSE_diff = CGM - OGTT)
+```
+
+```{r}
+# Calculate summary statistics
+summary_stats <- data_wide %>%
+  group_by(Metric) %>%
+  summarize(
+    mean_diff = mean(MSE_diff, na.rm = TRUE),
+    median_diff = median(MSE_diff, na.rm = TRUE),
+    sd_diff = sd(MSE_diff, na.rm = TRUE),
+    n = sum(!is.na(MSE_diff))
+  )
+
+print(summary_stats)
+```
+Additional clarifications on model peculiarities:
+
+Asymmetry in data sources:
+The CGM-calibrated model uses a mix of data sources (CGM for glucose, OGTT for insulin), while the OGTT-calibrated model uses consistent data sources. This asymmetry might introduce some bias or inconsistency in the CGM-calibrated model's performance.
+Temporal resolution:
+CGM data typically has higher temporal resolution than OGTT data. The model might be capturing more detailed glucose dynamics with CGM data, but this level of detail isn't available for insulin in either case.
+Physiological lag:
+There's a natural lag between glucose changes and insulin responses. The CGM-calibrated model might capture this lag differently due to the higher resolution of glucose data.
+Weighting in loss function:
+The loss function likely gives different weights to glucose and insulin errors to account for their different scales. This weighting might interact differently with CGM and OGTT data due to their different characteristics.
+Parameter interdependence:
+Some model parameters might be more sensitive to glucose data, while others to insulin data. The different data sources used in the CGM-calibrated model might lead to different parameter estimates compared to the OGTT-calibrated model.
+Extrapolation to complex meals:
+Both models are calibrated on OGTT data for insulin, which represents a specific type of glucose challenge. Their performance on complex meal data involves some level of extrapolation, which might differ between the two calibration approaches.
+
+Understanding these nuances is crucial when interpreting the differences in MSE between the CGM and OGTT-calibrated models. The separate visualizations for glucose and insulin will help in discerning how these peculiarities manifest in the model's performance for each metabolite.
+
+```{r}
+# Read the data
+path <- file.choose()
+complex_ogtt_data <- read.csv(path)
+
+path <- file.choose()
+complex_cgm_data <- read.csv(path)
+```
+
+```{r}
+# Prepare OGTT data
+ogtt_prepared <- complex_ogtt_data %>%
+  mutate(Measure = "OGTT",
+         Metric = ifelse(metab == "gluc", "Glucose", "Insulin")) %>%
+  group_by(ID, Condition, Measure, Metric) %>%
+  summarize(MSE = mean(VAL^2)) %>%
+  ungroup()
+
+# Prepare CGM data
+cgm_prepared <- complex_cgm_data %>%
+    mutate(Measure = "CGM",
+         Metric = ifelse(metab == "gluc", "Glucose", "Insulin")) %>%
+  group_by(ID, Condition, Measure, Metric) %>%
+  summarize(MSE = mean(VAL^2)) %>%
+  ungroup()
+```
+
+```{r}
+# Combine datasets
+final_data <- bind_rows(ogtt_prepared, cgm_prepared)
+
+# Create density plots
+density_plot <- ggplot(final_data, aes(x = MSE, fill = Measure)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~ Metric, scales = "free") +
+  scale_x_log10() +
+  labs(
+    title = "Distribution of MSE values: CGM vs Venous for extrapolation of calibrated parameters",
+    x = "Mean Squared Error (log scale)",
+    y = "Density"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(color = "white"),   # Set title text to white
+    axis.title.x = element_text(color = "white"), # Set x-axis label text to white
+    axis.title.y = element_text(color = "white"), # Set y-axis label text to white
+    axis.text = element_text(color = "white"),    # Set axis text to white
+    strip.text = element_text(color = "white"),   # Set facet labels to white
+    legend.text = element_text(color = "white"),  # Set legend text to white
+    legend.title = element_text(color = "white")  # Set legend title to white
+  )
+
+# Update the legend labels
+density_plot <- density_plot + 
+  scale_fill_discrete(labels = c("CGM" = "CGM", "OGTT" = "Venous"))
+
+# Print the plot
+print(density_plot)
+
+# Save the density plot
+ggsave("complex_cgm_vs_ogtt_mse_distribution.png", density_plot, width = 10, height = 6)
+
+# Calculate summary statistics including median and IQR, handling NAs
+summary_stats <- final_data %>%
+  group_by(Measure, Metric) %>%
+  summarize(
+    mean_MSE = mean(MSE, na.rm = TRUE),
+    median_MSE = median(MSE, na.rm = TRUE),
+    sd_MSE = sd(MSE, na.rm = TRUE),
+    IQR_MSE = IQR(MSE, na.rm = TRUE),
+    Q1 = quantile(MSE, 0.25, na.rm = TRUE),
+    Q3 = quantile(MSE, 0.75, na.rm = TRUE),
+    n = sum(!is.na(MSE)),
+    n_missing = sum(is.na(MSE))
+  )
+
+# Print summary statistics
+print(summary_stats)
+```
+
+```{r}
+n_ids_final <- final_data %>% 
+  distinct(ID, Measure) %>% 
+  group_by(Measure) %>%
+  summarize(n_ids = n())
+
+print(n_ids_final)
+```
+
+```{r}
+path <- file.choose()
+ogtt_data <- read.csv(path)
+
+path <- file.choose()
+cgm_data <- read.csv(path)
+```
+
+First this section is comparing the OGTT and CGM calibrated fits on the HFMM data, the baseline comparison essentially. The fits are evaluated
+using the Sum of Square errors with the fact that the CGM data has additional data points compared to OGTT resolved by use of Mean Squared Error (MSE). A threshold is also created for "bad fits" as the top 10% of MSE values for each combination of Measure and Metric.
+
+The below criteria were derived from the Erdos 2024 paper.
+
+1."Bad fit" is defined using the Erdos 2024 definition as personalised models with a mean squared error (MSE) in glucose simulation above 1.5
+
+2. Comparison method:
+Compared number of bad fits between models calibrated on plasma glucose and those calibrated on CGM glucose.
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+
+# Reshape OGTT data
+ogtt_long <- ogtt_data %>%
+  pivot_longer(cols = c("X30", "X60", "X120", "X180", "X240"),  # Removed X0
+               names_to = "Time",
+               values_to = "Residual") %>%
+  mutate(Measure = "OGTT")
+
+# Reshape CGM data
+cgm_long <- cgm_data %>%
+  pivot_longer(cols = starts_with("X") & !matches("X0"),  # Exclude X0
+               names_to = "Time",
+               values_to = "Residual") %>%
+  mutate(Measure = "CGM")
+
+# Combine OGTT and CGM data
+combined_data <- bind_rows(ogtt_long, cgm_long)
+
+# Calculate MSE
+mse_data <- combined_data %>%
+  group_by(ID, metab, Condition, Measure) %>%
+  summarise(Value = mean(Residual^2, na.rm = TRUE),
+            n_points = sum(!is.na(Residual))) %>%
+  ungroup()
+
+# Rename columns and arrange data
+data <- mse_data %>%
+  rename(ID_Condition = ID,
+         Metric = metab) %>%
+  mutate(Metric = case_when(
+    Metric == "gluc" ~ "glucose_mse",
+    Metric == "ins" ~ "insulin_mse",
+    TRUE ~ Metric
+  )) %>%
+  select(ID_Condition, Measure, Metric, Value, n_points)
+
+# Calculate summary statistics including median and IQR, handling NAs
+summary_stats <- data %>%
+  group_by(Measure, Metric) %>%
+  summarize(
+    mean_MSE = mean(Value, na.rm = TRUE),
+    median_MSE = median(Value, na.rm = TRUE),
+    sd_MSE = sd(Value, na.rm = TRUE),
+    IQR_MSE = IQR(Value, na.rm = TRUE),
+    Q1 = quantile(Value, 0.25, na.rm = TRUE),
+    Q3 = quantile(Value, 0.75, na.rm = TRUE),
+    n = sum(!is.na(Value)),
+    n_missing = sum(is.na(Value))
+  )
+
+# Print summary statistics
+print(summary_stats)
+
+# Create density plots of MSE for each Measure and Metric
+density_plot <- ggplot(data, aes(x = Value, fill = Measure)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~ Metric, scales = "free") +
+  scale_x_log10() +  # Use log scale if MSE values have a wide range
+  labs(
+    title = "Distribution of MSE Values: CGM vs Venous using High Fat Mixed Meal Test",
+    x = "Mean Squared Error (log scale)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(color = "white"),
+    axis.title.x = element_text(color = "white"),
+    axis.title.y = element_text(color = "white"),
+    axis.text = element_text(color = "white"),
+    strip.text = element_text(color = "white"),
+    legend.text = element_text(color = "white"),
+    legend.title = element_text(color = "white")
+  )
+
+# Update the legend labels
+density_plot <- density_plot + 
+  scale_fill_discrete(labels = c("CGM" = "CGM", "OGTT" = "Venous"))
+
+print(density_plot)
+
+# Save the density plot
+ggsave("mse_distribution_comparison.png", density_plot, width = 10, height = 6)
+
+# Calculate the number of "bad fits" (MSE > 1.5) for glucose
+bad_fits <- data %>%
+  filter(Metric == "glucose_mse") %>%
+  group_by(Measure) %>%
+  summarize(
+    total_fits = n(),
+    bad_fits = sum(Value > 1.5, na.rm = TRUE),
+    percent_bad_fits = (bad_fits / total_fits) * 100
+  )
+
+print(bad_fits)
+```
+
+```{r}
+library(gt)
+library(dplyr)
+
+# Create the data frame
+data <- tibble(
+  Characteristic = c(
+    "Age (years, mean ± SD)",
+    "Sex distribution",
+    "- Female",
+    "- Male",
+    "BMI (kg/m2, mean ± SD)",
+    "HbA1c (%, median (IQR)) *",
+    "Fasting glucose (mmol/L, median (IQR))",
+    "2-hour glucose (mmol/L, median (IQR))",
+    "Insulin resistance indices",
+    "- HOMA-IR, median (IQR)",
+    "- HOMA-β, median (IQR)",
+    "- Matsuda index, median (IQR)",
+    "- Liver fat content (%, median (IQR))"
+  ),
+  Value = c(
+    "60.6 ± 7.8",
+    "",
+    "57 % (N = 135)",
+    "43 % (N = 102)",
+    "30.4 ± 7.7",
+    "5.3 (5.1 - 5.4)",
+    "5.30 (5.00 - 5.70)",
+    "6.39 (5.37 - 7.63)",
+    "",
+    "7.7 (5.4 - 11.5)",
+    "77.9 (61.0 - 102.0)",
+    "78.7 (51.0 - 114.1)",
+    "6.0 (3.3 - 13.2)"
+  )
+)
+
+# Create the table
+table <- data %>%
+  gt() %>%
+  tab_header(
+    title = "Table 1. Characteristics of Study Participants",
+    subtitle = "N = 237"
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = everything()
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_body(
+      rows = c(1, 2, 5, 6, 7, 8, 9)
+    )
+  ) %>%
+  tab_style(
+    style = cell_text(indent = px(20)),
+    locations = cells_body(
+      rows = c(3, 4, 10, 11, 12, 13)
+    )
+  ) %>%
+  tab_source_note(
+    source_note = md("Data are presented as mean ± standard deviation for normally distributed continuous variables, median (interquartile range) for non-normally distributed continuous variables, and percentage (count) for categorical variables. Body mass index (BMI) is expressed in kg/m². Fasting glucose and 2-hour glucose values are derived from the oral glucose tolerance test (OGTT) and expressed in mmol/L. * Glycated haemoglobin (HbA1c) is reported as a percentage. Homeostatic Model Assessment for Insulin Resistance (HOMA-IR) and Homeostatic Model Assessment for β-cell function (HOMA-β) are unitless indices. The Matsuda index is presented in arbitrary units. Liver fat content is expressed as a percentage. HbA1c measurements were available for 183 participants, while liver fat content was assessed in 102 participants.")
+  ) %>%
+  tab_options(
+    table.border.top.color = "black",
+    table.border.top.width = px(2),
+    table.border.bottom.color = "black",
+    table.border.bottom.width = px(2),
+    column_labels.border.bottom.color = "black",
+    column_labels.border.bottom.width = px(2)
+  )
+
+# Print the table (optional, for viewing in R)
+print(table)
+
+# Save the table as a PNG file
+gtsave(table, filename = "study_characteristics_table.png", path = getwd())
+
+# Print the save location (optional, for user information)
+cat("Table saved as 'study_characteristics_table.png' in:", getwd())
+```
+
