@@ -1,10 +1,16 @@
 This folder contains the code related to the preprocessing of the data. This preprocessing was identification of the relevant 
 
-CGM/OGTT Data Processing Suite
-A collection of Python scripts for processing clinical glucose monitoring data:
+Collection of Python scripts for processing different types of clinical glucose tests:
 
-OGTT Processor: Processes 120-minute Oral Glucose Tolerance Test data
-HFMM Processor: Processes 240-minute High-Fat Mixed Meal test data
-Combined Data Processor: Transforms and combines OGTT (glucose/insulin) and CGM data from Excel sheets into a standardized format
+Raw Data Processors:
+CGM_meal_data_locator3: Processes raw CGM data with OGTT timing
+HFMM_meal_data_locator3: Processes raw CGM data with HFMM timing
 
-Each script serves different purposes in the data processing pipeline, from raw data processing to final data formatting and validation.
+
+Excel Data Processors:
+OGTT&CGM_meal_locator: Processes OGTT glucose, insulin, and CGM data
+HFMM_meal_processor: Processes HFMM plasma glucose and insulin data
+
+
+Each script standardizes participant IDs, handles time windows appropriately, and includes data validation. 
+Output format is consistent across all processors for easy integration into analysis pipelines.
